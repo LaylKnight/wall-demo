@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 45 11% 92%;
+    --foreground: 0 0% 12%;
+    --card: 45 10% 90%;
+    --card-foreground: 0 0% 12%;
+    --popover: 45 11% 92%;
+    --popover-foreground: 0 0% 12%;
+    --primary: 210 81% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 8% 86%;
+    --secondary-foreground: 0 0% 15%;
+    --muted: 45 8% 85%;
+    --muted-foreground: 0 0% 38%;
+    --accent: 210 81% 53%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 210 81% 53%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-[#edece8] text-[#1f1f1f] antialiased;
+  }
+}
+
+/* Clean solid surface for the Wall composer box */
+.wall-composer-box {
+  background-color: #f8fafc;
+}
+
+.wall-composer-box:focus-within {
+  background-color: #ffffff;
+  border-color: #1f73cc;
+  box-shadow: 0 0 0 3px rgba(37, 133, 232, 0.18);
+}
+
+/* Clean solid surfaces for the Information boxes */
+.wall-info-header {
+  background-color: #e3e2de;
+}
+
+.wall-info-card {
+  background-color: #e7e6e2;
+}
