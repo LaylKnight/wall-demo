@@ -1,43 +1,97 @@
 "use client";
 
 import * as React from "react";
+import { ChevronDown } from "lucide-react";
+
+interface SidebarCardProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+function SidebarCard({ title, children }: SidebarCardProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  return (
+    <div className="w-full overflow-hidden rounded-[12px] border-[2px] border-[var(--wall-border)] bg-white text-[var(--wall-text-body)]">
+      {/* Mobile Accordion Toggle Header */}
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
+        className="w-full flex items-center justify-between bg-[#EBF4FF] px-2.5 sm:px-4 py-2 font-sans font-semibold text-[15px] sm:text-[16px] text-[var(--wall-btn-dark-text)] sm:hidden"
+      >
+        <span>{title}</span>
+        <ChevronDown
+          className={`h-4 w-4 text-[var(--wall-btn-dark-text)] transition-transform duration-200 ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {/* Tablet/Desktop Static Header */}
+      <div className="hidden sm:block bg-[#EBF4FF] px-4 py-2 border-b-[2px] border-[var(--wall-border)] font-sans font-semibold text-[16px] text-[var(--wall-btn-dark-text)]">
+        {title}
+      </div>
+
+      {/* Content: collapsible on mobile, always visible on sm+ */}
+      <div
+        className={`${
+          isOpen ? "block border-t-[2px] border-[var(--wall-border)]" : "hidden"
+        } sm:block sm:border-t-0 px-2.5 sm:px-4 py-3 sm:py-4 font-sans text-[13px] sm:text-[14px] leading-[1.45]`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export function ProfileSidebar() {
   return (
-    <aside className="w-full md:w-[250px] lg:w-[270px] shrink-0 flex flex-col gap-5">
-      {/* Greg Wientjes Profile Portrait cropped directly from the reference image */}
-      <div className="w-full max-w-[260px] mx-auto md:max-w-none overflow-hidden rounded-[18px] bg-[#d8d7d2] shadow-sm border-[1.5px] border-neutral-400/80">
-        <div className="relative w-full aspect-[524/514] overflow-hidden">
+    <aside className="w-full lg:w-[260px] shrink-0 grid grid-cols-2 lg:flex lg:flex-col gap-3 sm:gap-5 lg:sticky lg:top-5 items-start lg:items-stretch">
+      {/* Greg Wientjes Profile Portrait */}
+      <div className="w-full overflow-hidden rounded-[12px] bg-[#F8F9FB] border-[1.5px] border-[var(--wall-border)]/25 shadow-sm">
+        <div className="relative w-full aspect-square overflow-hidden">
           <img
-            src="/reference-wall.webp"
+            src="/greg-profile.png"
             alt="Greg Wientjes"
-            className="block select-none pointer-events-none max-w-none"
-            style={{
-              width: "355.53%",
-              marginLeft: "-4.96%",
-              marginTop: "-25.57%",
-            }}
+            className="w-full h-full object-cover block select-none pointer-events-none"
           />
         </div>
       </div>
 
-      {/* 2008-Style Information Box */}
-      <div className="flex flex-col gap-1.5 text-[#222222]">
-        <div className="wall-info-header px-3.5 py-1.5 rounded-[10px] border-[1.5px] border-neutral-500/80 font-sans font-semibold text-[18px] leading-snug tracking-tight">
-          Information
-        </div>
-
-        <div className="wall-info-card px-4 py-4 rounded-[18px] border-[1.5px] border-neutral-400/80 font-sans text-[16px] leading-[1.4] space-y-4">
-          <div>
-            <div className="font-medium text-neutral-600 text-[14px]">Networks</div>
-            <div className="font-normal text-neutral-900">Stanford Alum</div>
+      {/* Bio + Information Cards (accordion on mobile, static cards on sm+) */}
+      <div className="w-full flex flex-col gap-3 sm:gap-5">
+        <SidebarCard title="Bio">
+          <div className="max-h-[130px] overflow-y-auto pr-1 pb-2">
+            <p className="font-normal text-[var(--wall-text-body)]">
+              Builder, coffee enthusiast, and lifelong learner based in Palo Alto.
+              Always tinkering with web apps, late-night side projects, and
+              questionable dance moves.
+            </p>
           </div>
+        </SidebarCard>
 
-          <div>
-            <div className="font-medium text-neutral-600 text-[14px]">Current City</div>
-            <div className="font-normal text-neutral-900">Palo Alto, CA</div>
+        <SidebarCard title="Information">
+          <div className="space-y-4">
+            <div>
+              <div className="font-semibold text-[var(--wall-text-heading)]">
+                Networks:
+              </div>
+              <div className="font-normal text-[var(--wall-text-body)]">
+                Stanford Alum
+              </div>
+            </div>
+
+            <div>
+              <div className="font-semibold text-[var(--wall-text-heading)]">
+                Current City:
+              </div>
+              <div className="font-normal text-[var(--wall-text-body)]">
+                Palo Alto, CA
+              </div>
+            </div>
           </div>
-        </div>
+        </SidebarCard>
       </div>
     </aside>
   );

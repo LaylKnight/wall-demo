@@ -2,8 +2,16 @@
 
 import * as React from "react";
 import { X } from "lucide-react";
-import { type Post } from "@/lib/posts-store";
+import { parsePhotoUrls, type Post } from "@/lib/posts-store";
+import { isSafeImageUrl } from "@/lib/security";
 import { formatFullTimestamp, formatRelativeTime } from "@/lib/utils";
+
+function getPostImages(post: Post): string[] {
+  if (post.image_urls && post.image_urls.length > 0) {
+    return post.image_urls.filter(isSafeImageUrl);
+  }
+  return parsePhotoUrls(post.image_url);
+}
 
 interface PostFeedProps {
   posts: Post[];
@@ -47,7 +55,7 @@ export function PostFeed({
 
   if (posts.length === 0) {
     return (
-      <div className="rounded-xl border-2 border-dashed border-neutral-400/70 p-8 text-center font-hand text-xl text-neutral-600">
+      <div className="rounded-xl border-2 border-dashed border-[var(--wall-border-input)] p-8 text-center font-sans text-base text-[var(--wall-text-muted)]">
         No posts on Greg&apos;s Wall yet. Be the first to write something above!
       </div>
     );
@@ -55,62 +63,82 @@ export function PostFeed({
 
   return (
     <>
-      <div className="divide-y-0">
-        {posts.map((post, idx) => {
+      <div>
+        {posts.map((post) => {
           const isNew = post.id === highlightedPostId;
-          const isLast = idx === posts.length - 1;
+          const postImages = getPostImages(post);
 
           return (
             <article
               key={post.id}
-              className={`py-3.5 transition-colors duration-500 ${
-                !isLast
-                  ? "border-b-[3px] border-double border-neutral-600/80"
-                  : ""
-              } ${
+              className={`py-4 border-b border-[#466482]/20 transition-colors duration-700 -mx-2 px-2 ${
                 isNew
-                  ? "animate-fade-in-up bg-[#2585e8]/8 -mx-2 px-2 rounded-lg"
-                  : ""
+                  ? "animate-fade-in-up bg-[#F8F9FB]"
+                  : "bg-transparent"
               }`}
             >
-              <div className="flex items-baseline justify-between gap-2 mb-0.5">
-                <h3 className="font-sans text-[19px] sm:text-[20px] font-semibold text-[#1e1e1e] tracking-tight leading-snug">
+              <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                <h3 className="font-sans text-[16px] sm:text-[17px] font-semibold text-[var(--wall-text-heading)] tracking-tight leading-snug">
                   {post.author_name}
                 </h3>
 
                 <time
                   dateTime={post.created_at}
                   title={formatFullTimestamp(post.created_at)}
-                  className="font-sans font-normal text-[12px] text-neutral-500 shrink-0 select-none"
+                  className="font-sans font-normal text-[12px] text-[var(--wall-text-muted)] shrink-0 select-none"
                 >
                   {formatRelativeTime(post.created_at)}
                 </time>
               </div>
 
               {post.message && (
-                <p className="font-sans font-normal text-[17px] sm:text-[18px] text-[#222222] leading-[1.42] whitespace-pre-wrap break-words">
+                <p className="font-sans font-normal text-[15px] sm:text-[16px] text-[var(--wall-text-body)] leading-[1.45] whitespace-pre-wrap break-words">
                   {post.message}
                 </p>
               )}
 
-              {post.image_url && (
+              {postImages.length === 1 && (
                 <div className="mt-2.5">
                   <button
                     type="button"
                     onClick={() =>
                       setLightboxImage({
-                        url: post.image_url!,
+                        url: postImages[0],
                         author: post.author_name,
                       })
                     }
-                    className="group relative inline-block overflow-hidden rounded-xl border-2 border-neutral-700/80 bg-white p-1.5 shadow-sm transition-transform hover:scale-[1.01]"
+                    className="group relative inline-block overflow-hidden rounded-xl transition-transform hover:scale-[1.01]"
                   >
                     <img
-                      src={post.image_url}
+                      src={postImages[0]}
                       alt={`Uploaded by ${post.author_name}`}
-                      className="max-h-64 w-auto rounded-lg object-contain"
+                      className="max-h-64 w-auto rounded-xl object-contain"
                     />
                   </button>
+                </div>
+              )}
+
+              {postImages.length > 1 && (
+                <div className="mt-2.5 grid grid-cols-2 gap-2 max-w-lg">
+                  {postImages.map((url, idx) => (
+                    <button
+                      key={`${post.id}-img-${idx}`}
+                      type="button"
+                      onClick={() =>
+                        setLightboxImage({
+                          url,
+                          author: post.author_name,
+                        })
+                      }
+                      className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl transition-transform hover:scale-[1.01]"
+                    >
+                      <img
+                        src={url}
+                        alt={`Uploaded by ${post.author_name} (${idx + 1})`}
+                        className="h-full w-full rounded-xl object-cover"
+                      />
+                    </button>
+                  ))}
                 </div>
               )}
             </article>
@@ -128,13 +156,13 @@ export function PostFeed({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[90vh] max-w-3xl rounded-2xl border-2 border-neutral-800 bg-[#edece8] p-3 shadow-2xl"
+            className="relative max-h-[90vh] max-w-3xl rounded-2xl border-2 border-[var(--wall-border)] bg-white p-3 shadow-2xl"
           >
             <button
               type="button"
               onClick={() => setLightboxImage(null)}
               aria-label="Close image preview"
-              className="absolute -right-3 -top-3 flex h-8 w-8 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-white shadow-md hover:bg-red-600"
+              className="absolute -right-3 -top-3 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--wall-border)] bg-[var(--wall-border)] text-white shadow-md hover:bg-red-600"
             >
               <X className="h-4 w-4" />
             </button>
@@ -143,7 +171,7 @@ export function PostFeed({
               alt={`Shared by ${lightboxImage.author}`}
               className="max-h-[80vh] w-auto rounded-xl object-contain mx-auto"
             />
-            <div className="mt-2 text-center font-hand text-base text-neutral-700">
+            <div className="mt-2 text-center font-sans text-sm font-medium text-[var(--wall-text-body)]">
               Shared by {lightboxImage.author}
             </div>
           </div>

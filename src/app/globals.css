@@ -4,24 +4,39 @@
 
 @layer base {
   :root {
-    --background: 45 11% 92%;
+    --wall-border: #06305C;
+    --wall-border-highlight: #2585E8;
+    --wall-border-default-btn: #06305C;
+    --wall-border-input: #B1D5FF;
+    --wall-text-body: #1E1E1E;
+    --wall-text-heading: #1E1E1E;
+    --wall-text-light: #FFFFFF;
+    --wall-text-muted: #466482;
+    --wall-text-link: #2585E8;
+    --wall-btn-dark-text: #06305C;
+    --wall-btn-white-text: #FFFFFF;
+    --wall-bg-input: #F8F9FB;
+    --wall-bg-blue: #2585E8;
+    --wall-bg-header: #2585E8;
+
+    --background: 0 0% 100%;
     --foreground: 0 0% 12%;
-    --card: 45 10% 90%;
+    --card: 0 0% 100%;
     --card-foreground: 0 0% 12%;
-    --popover: 45 11% 92%;
+    --popover: 0 0% 100%;
     --popover-foreground: 0 0% 12%;
     --primary: 210 81% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 45 8% 86%;
-    --secondary-foreground: 0 0% 15%;
-    --muted: 45 8% 85%;
-    --muted-foreground: 0 0% 38%;
+    --secondary: 213 33% 97%;
+    --secondary-foreground: 211 88% 19%;
+    --muted: 213 33% 97%;
+    --muted-foreground: 210 30% 39%;
     --accent: 210 81% 53%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 25%;
-    --input: 0 0% 25%;
+    --border: 211 88% 19%;
+    --input: 212 100% 85%;
     --ring: 210 81% 53%;
     --radius: 0.75rem;
   }
@@ -32,26 +47,8 @@
     @apply border-border;
   }
   body {
-    @apply bg-[#edece8] text-[#1f1f1f] antialiased;
+    background-color: #ffffff;
+    color: var(--wall-text-body);
+    @apply antialiased;
   }
-}
-
-/* Clean solid surface for the Wall composer box */
-.wall-composer-box {
-  background-color: #f8fafc;
-}
-
-.wall-composer-box:focus-within {
-  background-color: #ffffff;
-  border-color: #1f73cc;
-  box-shadow: 0 0 0 3px rgba(37, 133, 232, 0.18);
-}
-
-/* Clean solid surfaces for the Information boxes */
-.wall-info-header {
-  background-color: #e3e2de;
-}
-
-.wall-info-card {
-  background-color: #e7e6e2;
 }

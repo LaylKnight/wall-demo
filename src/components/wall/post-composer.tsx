@@ -1,28 +1,49 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, Loader2, AlertCircle, X, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  ImagePlus,
+  Loader2,
+  AlertCircle,
+  X,
+  Send,
+  UploadCloud,
+} from "lucide-react";
 import {
   AUTHOR_STORAGE_KEY,
+  MAX_IMAGES_PER_POST,
   MAX_MESSAGE_LENGTH,
   fileToCompressedDataUrl,
   type CreatePostInput,
 } from "@/lib/posts-store";
+import { validateImageFile } from "@/lib/security";
 
 interface PostComposerProps {
   onSharePost: (input: CreatePostInput) => Promise<void>;
   isSubmitting: boolean;
 }
 
-const QUICK_AUTHORS = ["Greg Wientjes", "Anna", "Adelaida", "Juho", "Maija", "Alex", "Sheryl"];
+interface AttachedImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+const QUICK_AUTHORS = [
+  "Greg Wientjes",
+  "Anna",
+  "Adelaida",
+  "Juho",
+  "Maija",
+  "Alex",
+  "Sheryl",
+];
 
 export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
   const [authorName, setAuthorName] = React.useState("Greg Wientjes");
   const [message, setMessage] = React.useState("");
-  const [imageFile, setImageFile] = React.useState<File | null>(null);
-  const [imagePreview, setImagePreview] = React.useState<string | null>(null);
+  const [attachments, setAttachments] = React.useState<AttachedImage[]>([]);
+  const [showDropzone, setShowDropzone] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -37,6 +58,14 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
       }
     }
   }, []);
+
+  React.useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => {
+      setError(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   const handleAuthorChange = (val: string) => {
     setAuthorName(val);
@@ -53,40 +82,66 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
     }
   };
 
-  const processSelectedFile = async (file: File) => {
+  const processSelectedFiles = async (fileList: FileList | File[]) => {
     setError(null);
-    if (!file.type.startsWith("image/")) {
-      setError("Please select a valid image file (PNG, JPG, WEBP, or GIF).");
+    const incoming = Array.from(fileList);
+    if (incoming.length === 0) return;
+
+    const remainingSlots = MAX_IMAGES_PER_POST - attachments.length;
+    if (remainingSlots <= 0) {
+      setError(`You can attach up to ${MAX_IMAGES_PER_POST} images per post.`);
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
-      setError("Image size must be under 8 MB.");
-      return;
+
+    const filesToProcess = incoming.slice(0, remainingSlots);
+    const nextAttachments: AttachedImage[] = [];
+    const errors: string[] = [];
+
+    for (const file of filesToProcess) {
+      const check = await validateImageFile(file);
+      if (!check.valid) {
+        errors.push(`${file.name}: ${check.error}`);
+        continue;
+      }
+      try {
+        const previewUrl = await fileToCompressedDataUrl(file);
+        nextAttachments.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          file,
+          previewUrl,
+        });
+      } catch {
+        errors.push(`${file.name}: Could not process the selected image.`);
+      }
     }
-    try {
-      const previewDataUrl = await fileToCompressedDataUrl(file);
-      setImageFile(file);
-      setImagePreview(previewDataUrl);
-    } catch {
-      setError("Could not process the selected image. Please try another file.");
+
+    if (incoming.length > remainingSlots) {
+      errors.push(`Maximum of ${MAX_IMAGES_PER_POST} images per post.`);
+    }
+
+    if (nextAttachments.length > 0) {
+      setAttachments((prev) => [...prev, ...nextAttachments]);
+      setShowDropzone(false);
+    }
+
+    if (errors.length > 0) {
+      setError(errors[0]);
     }
   };
 
   const handleFileInputChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      await processSelectedFile(file);
+    if (e.target.files && e.target.files.length > 0) {
+      await processSelectedFiles(e.target.files);
     }
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  const handleRemoveImage = () => {
-    setImageFile(null);
-    setImagePreview(null);
+  const handleRemoveImage = (id: string) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== id));
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -109,9 +164,8 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
     e.stopPropagation();
     setIsDragging(false);
 
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      await processSelectedFile(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await processSelectedFiles(e.dataTransfer.files);
     }
   };
 
@@ -120,7 +174,7 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
     if (isSubmitting) return;
 
     const trimmedMsg = message.trim();
-    if (!trimmedMsg && !imagePreview) {
+    if (!trimmedMsg && attachments.length === 0) {
       setError("Write a short message or attach a photo to share on Greg's Wall.");
       textareaRef.current?.focus();
       return;
@@ -136,12 +190,12 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
       await onSharePost({
         author_name: authorName.trim() || "Greg Wientjes",
         message: trimmedMsg,
-        imageFile,
-        imageDataUrl: imagePreview,
+        imageFiles: attachments.map((a) => a.file),
+        imageDataUrls: attachments.map((a) => a.previewUrl),
       });
       setMessage("");
-      setImageFile(null);
-      setImagePreview(null);
+      setAttachments([]);
+      setShowDropzone(false);
     } catch (err) {
       setError(
         err instanceof Error
@@ -162,40 +216,29 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
   const isNearLimit = charsRemaining <= 30;
   const isAtLimit = charsRemaining === 0;
   const canShare =
-    !isSubmitting && (message.trim().length > 0 || Boolean(imagePreview));
+    !isSubmitting && (message.trim().length > 0 || attachments.length > 0);
+  const canAddMore = attachments.length < MAX_IMAGES_PER_POST;
 
   return (
     <form onSubmit={handleSubmit} className="mb-6">
-      {/* Author Name Bar */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-2">
-        <div className="relative flex items-center w-full sm:w-64">
-          <User className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-neutral-500" />
-          <Input
-            type="text"
-            value={authorName}
-            onChange={(e) => handleAuthorChange(e.target.value)}
-            placeholder="Your name (e.g. Anna)"
-            maxLength={50}
-            aria-label="Author name"
-            className="pl-8 h-8 font-hand text-[16px] bg-white/75 border-neutral-400/90 focus-visible:ring-[#2585e8]"
-          />
-        </div>
-
-        <div className="flex items-center gap-1 flex-wrap text-xs">
-          <span className="text-neutral-500 font-sans text-[11px] mr-0.5">
-            Post as:
-          </span>
+      {/* "Post as:" Quick Author Selector (no text input box) */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="font-sans text-[13px] font-medium text-[var(--wall-text-body)] mr-0.5">
+          Post as:
+        </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
           {QUICK_AUTHORS.map((name) => {
-            const active = authorName.trim().toLowerCase() === name.toLowerCase();
+            const active =
+              authorName.trim().toLowerCase() === name.toLowerCase();
             return (
               <button
                 key={name}
                 type="button"
                 onClick={() => handleAuthorChange(name)}
-                className={`px-2 py-0.5 rounded-full font-hand text-[13px] transition-colors border ${
+                className={`px-3 py-1 rounded-[8px] font-sans text-[13px] font-medium transition-colors border-[1.5px] ${
                   active
-                    ? "bg-[#2585e8] text-white border-[#2585e8]"
-                    : "bg-white/60 text-neutral-700 border-neutral-300 hover:bg-white"
+                    ? "bg-[var(--wall-bg-blue)] text-[var(--wall-btn-white-text)] border-[var(--wall-border-highlight)]"
+                    : "bg-white text-[var(--wall-btn-dark-text)] border-[var(--wall-border-default-btn)] hover:bg-[var(--wall-bg-input)]"
                 }`}
               >
                 {name === "Greg Wientjes" ? "Greg" : name}
@@ -205,116 +248,199 @@ export function PostComposer({ onSharePost, isSubmitting }: PostComposerProps) {
         </div>
       </div>
 
-      {/* Reference-style Dashed & Striped Message Box */}
-      <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`wall-composer-box relative rounded-[18px] border-[3px] border-dashed transition-all ${
-          isDragging
-            ? "border-[#2585e8] bg-[#d8ecff]/80 scale-[1.005]"
-            : "border-[#2b2b2b]"
-        }`}
-      >
-        <textarea
-          ref={textareaRef}
-          value={message}
-          onChange={handleMessageChange}
-          onKeyDown={handleKeyDown}
-          maxLength={MAX_MESSAGE_LENGTH}
-          rows={3}
-          disabled={isSubmitting}
-          placeholder="Write something on Greg's Wall... (max 280 characters)"
-          aria-label="Write something on Greg's Wall"
-          className="w-full resize-none bg-transparent px-4 py-3 font-hand text-[20px] leading-snug text-[#1f1f1f] placeholder:text-[#3a4a5e]/60 focus:outline-none disabled:opacity-60"
-        />
+      {/* Outer Composer Card */}
+      <div className="rounded-[16px] border-[2px] border-[var(--wall-border)] bg-white p-4">
+        {/* Inner Textarea Box */}
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`rounded-[12px] border-[2px] bg-[var(--wall-bg-input)] transition-colors ${
+            isDragging
+              ? "border-[var(--wall-border-highlight)] bg-[#EBF4FF]"
+              : "border-[var(--wall-border-input)] focus-within:border-[var(--wall-border-highlight)]"
+          }`}
+        >
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={handleMessageChange}
+            onKeyDown={handleKeyDown}
+            maxLength={MAX_MESSAGE_LENGTH}
+            rows={4}
+            disabled={isSubmitting}
+            placeholder="Write something on Greg's wall..."
+            aria-label="Write something on Greg's wall"
+            className="w-full resize-none bg-transparent px-4 py-3 font-sans text-[16px] font-normal leading-snug text-[var(--wall-text-body)] placeholder:text-[var(--wall-border-input)] focus:outline-none disabled:opacity-60"
+          />
 
-        {/* Attached Image Preview inside the composer */}
-        {imagePreview && (
-          <div className="px-4 pb-3 pt-1">
-            <div className="relative inline-block rounded-xl border-2 border-[#2b2b2b]/80 bg-white p-1.5 shadow-sm">
-              <img
-                src={imagePreview}
-                alt="Attachment preview"
-                className="max-h-44 w-auto rounded-lg object-contain"
-              />
-              <button
-                type="button"
-                onClick={handleRemoveImage}
-                aria-label="Remove attached image"
-                className="absolute -right-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-white shadow hover:bg-red-600 transition-colors"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+          {/* Attached Image Thumbnail Previews (horizontal row, borderless) */}
+          {attachments.length > 0 && (
+            <div className="px-4 pb-3 pt-2 flex flex-row items-center gap-2.5 overflow-x-auto">
+              {attachments.map((item) => (
+                <div key={item.id} className="relative shrink-0">
+                  <img
+                    src={item.previewUrl}
+                    alt="Attachment preview"
+                    className="h-16 w-16 rounded-lg object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveImage(item.id)}
+                    aria-label="Remove attached image"
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--wall-border)] text-white shadow hover:bg-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Character Counter */}
+        <div className="mt-1.5 mb-3 flex items-center justify-between">
+          <span
+            aria-live="polite"
+            className={`font-sans text-[12px] font-medium ${
+              isAtLimit
+                ? "text-red-600"
+                : isNearLimit
+                ? "text-amber-600"
+                : "text-[var(--wall-text-muted)]"
+            }`}
+          >
+            {message.length}/{MAX_MESSAGE_LENGTH}
+          </span>
+          {attachments.length > 0 && (
+            <span className="font-sans text-[12px] text-[var(--wall-text-muted)]">
+              {attachments.length}/{MAX_IMAGES_PER_POST} images attached
+            </span>
+          )}
+        </div>
+
+        {/* Collapsible Drop Image Interface */}
+        {showDropzone && (
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            aria-label="Drop images here or click to browse"
+            className={`relative mb-3 flex flex-col items-center justify-center gap-1.5 rounded-[12px] border-[2px] border-dashed px-4 py-6 text-center cursor-pointer transition-colors animate-fade-in-up ${
+              isDragging
+                ? "border-[var(--wall-border-highlight)] bg-[#EBF4FF]"
+                : "border-[var(--wall-border-input)] bg-[var(--wall-bg-input)] hover:border-[var(--wall-border-highlight)] hover:bg-[#F1F6FC]"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDropzone(false);
+              }}
+              aria-label="Close drop image panel"
+              className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full text-[var(--wall-text-muted)] hover:bg-[var(--wall-border)]/10 hover:text-[var(--wall-border)] transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EBF4FF] text-[var(--wall-text-link)]">
+              <UploadCloud className="h-5 w-5" />
+            </div>
+
+            <div className="font-sans text-[14px] font-medium text-[var(--wall-text-body)]">
+              Drag &amp; drop images here, or{" "}
+              <span className="text-[var(--wall-text-link)] underline underline-offset-2">
+                browse files
+              </span>
+            </div>
+            <div className="font-sans text-[12px] text-[var(--wall-text-muted)]">
+              PNG, JPG, WEBP, or GIF • Up to {MAX_IMAGES_PER_POST} images • Max 5 MB each
             </div>
           </div>
         )}
-      </div>
 
-      {/* Error Message Banner */}
-      {error && (
-        <div
-          role="alert"
-          className="mt-2.5 flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 animate-fade-in-up"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Composer Footer: Image Upload + Character Counter + Blue Share Button */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={handleFileInputChange}
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-400/90 bg-white/80 hover:bg-white px-3 py-1.5 text-xs font-sans font-medium text-neutral-800 shadow-sm transition-all active:translate-y-[1px] disabled:opacity-50"
-          >
-            <ImagePlus className="h-4 w-4 text-[#2585e8]" />
-            <span>{imagePreview ? "Change Photo" : "Upload Photo"}</span>
-          </button>
-
-          {/* Character Counter Pill */}
+        {/* Error Message Banner */}
+        {error && (
           <div
-            aria-live="polite"
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-sans font-medium transition-colors ${
-              isAtLimit
-                ? "bg-red-100 text-red-700 border border-red-300"
-                : isNearLimit
-                ? "bg-amber-100 text-amber-800 border border-amber-300"
-                : "bg-black/5 text-neutral-600"
-            }`}
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 animate-fade-in-up"
           >
-            <span>
-              {message.length} / {MAX_MESSAGE_LENGTH}
-            </span>
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss alert"
+              className="shrink-0 rounded-full p-0.5 text-red-600 hover:bg-red-100 hover:text-red-800 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
-        </div>
+        )}
 
-        <Button
-          type="submit"
-          variant="wallShare"
-          size="lg"
-          disabled={!canShare}
-          className="min-w-[108px] h-11 px-6 text-[21px] font-bold tracking-wide shadow-[0_2px_0_#155799]"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-base">Sharing...</span>
-            </>
-          ) : (
-            "Share"
-          )}
-        </Button>
+        {/* Composer Footer: Upload Image + Blue Share Button */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={handleFileInputChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => setShowDropzone((prev) => !prev)}
+              disabled={isSubmitting || !canAddMore}
+              aria-expanded={showDropzone}
+              className={`inline-flex items-center gap-2 rounded-[8px] border-[1.5px] px-3.5 py-2 text-[13px] font-sans font-medium transition-colors active:translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed ${
+                showDropzone
+                  ? "border-[var(--wall-border-highlight)] bg-[#EBF4FF] text-[var(--wall-btn-dark-text)]"
+                  : "border-[var(--wall-border-default-btn)] bg-white hover:bg-[var(--wall-bg-input)] text-[var(--wall-btn-dark-text)]"
+              }`}
+            >
+              <ImagePlus className="h-4 w-4 text-[var(--wall-text-link)]" />
+              <span>
+                {attachments.length > 0
+                  ? canAddMore
+                    ? `Add Image (${attachments.length}/${MAX_IMAGES_PER_POST})`
+                    : `Max Images (${MAX_IMAGES_PER_POST}/${MAX_IMAGES_PER_POST})`
+                  : "Upload Image"}
+              </span>
+            </button>
+          </div>
+
+          <button
+            type="submit"
+            disabled={!canShare}
+            className="inline-flex items-center justify-center gap-2 rounded-[8px] border-[1.5px] border-[var(--wall-border-highlight)] bg-[var(--wall-bg-blue)] hover:bg-[#1b72cc] px-6 py-2 text-[14px] font-sans font-semibold text-[var(--wall-btn-white-text)] transition-colors active:translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Sharing...</span>
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                <span>Share</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </form>
   );

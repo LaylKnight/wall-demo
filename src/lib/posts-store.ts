@@ -1,25 +1,36 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  isSafeImageUrl,
+  reencodeSafeImageBlob,
+  sanitizeTextInput,
+  validateImageFile,
+} from "@/lib/security";
 
 export interface Post {
   id: string;
   author_name: string;
   message: string;
   image_url?: string | null;
+  image_urls?: string[];
   created_at: string;
 }
 
 export interface CreatePostInput {
   author_name: string;
   message: string;
+  imageFiles?: File[];
+  imageDataUrls?: string[];
   imageFile?: File | null;
   imageDataUrl?: string | null;
 }
 
 export const MAX_MESSAGE_LENGTH = 280;
+export const MAX_IMAGES_PER_POST = 4;
 export const STORAGE_KEY = "wall_demo_posts_v1";
 export const AUTHOR_STORAGE_KEY = "wall_demo_author_v1";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
+const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
+const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
 const storageBucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET?.trim() || "wall-images";
 
@@ -141,18 +152,63 @@ export async function fileToCompressedDataUrl(
   });
 }
 
+export interface SupabasePostRow {
+  id: string;
+  user_id?: string | null;
+  author_name?: string | null;
+  body?: string | null;
+  photo_url?: string | null;
+  created_at?: string | null;
+}
+
+export function parsePhotoUrls(raw?: string | null): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (u): u is string => typeof u === "string" && isSafeImageUrl(u)
+        );
+      }
+    } catch {
+      return [];
+    }
+  }
+  return isSafeImageUrl(trimmed) ? [trimmed] : [];
+}
+
+function serializePhotoUrls(urls: string[]): string | null {
+  if (urls.length === 0) return null;
+  if (urls.length === 1) return urls[0];
+  return JSON.stringify(urls);
+}
+
+export function mapSupabaseRowToPost(row: SupabasePostRow): Post {
+  const urls = parsePhotoUrls(row.photo_url);
+  return {
+    id: row.id,
+    author_name: sanitizeTextInput(row.author_name?.trim() || "Greg Wientjes"),
+    message: sanitizeTextInput(row.body ?? ""),
+    image_url: urls[0] ?? null,
+    image_urls: urls,
+    created_at: row.created_at ?? new Date().toISOString(),
+  };
+}
+
 export async function fetchPosts(): Promise<Post[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase
       .from("posts")
-      .select("id, author_name, message, image_url, created_at")
+      .select("id, user_id, author_name, body, photo_url, created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
       throw new Error(error.message || "Failed to load posts from Supabase.");
     }
-    return (data as Post[]) ?? [];
+    return ((data as SupabasePostRow[]) ?? []).map(mapSupabaseRowToPost);
   }
 
   // LocalStorage fallback mode
@@ -180,11 +236,27 @@ export async function fetchPosts(): Promise<Post[]> {
 }
 
 export async function createPost(input: CreatePostInput): Promise<Post> {
-  const trimmedAuthor = input.author_name.trim() || "Greg Wientjes";
-  const trimmedMessage = input.message.trim();
+  const trimmedAuthor =
+    sanitizeTextInput(input.author_name).trim().slice(0, 60) || "Greg Wientjes";
+  const trimmedMessage = sanitizeTextInput(input.message).trim();
 
-  if (!trimmedMessage && !input.imageFile && !input.imageDataUrl) {
+  const files: File[] = input.imageFiles?.length
+    ? input.imageFiles
+    : input.imageFile
+    ? [input.imageFile]
+    : [];
+  const dataUrls: string[] = input.imageDataUrls?.length
+    ? input.imageDataUrls
+    : input.imageDataUrl
+    ? [input.imageDataUrl]
+    : [];
+
+  if (!trimmedMessage && files.length === 0 && dataUrls.length === 0) {
     throw new Error("Please write a message or attach an image before sharing.");
+  }
+
+  if (files.length > MAX_IMAGES_PER_POST || dataUrls.length > MAX_IMAGES_PER_POST) {
+    throw new Error(`You can attach up to ${MAX_IMAGES_PER_POST} images per post.`);
   }
 
   if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
@@ -193,29 +265,50 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     );
   }
 
+  for (const url of dataUrls) {
+    if (!isSafeImageUrl(url)) {
+      throw new Error("Invalid image data.");
+    }
+  }
+
+  const validatedFiles: Array<{ file: File; mime: string }> = [];
+  for (const file of files) {
+    const check = await validateImageFile(file);
+    if (!check.valid) {
+      throw new Error(check.error);
+    }
+    validatedFiles.push({ file, mime: check.mime });
+  }
+
   const supabase = getSupabaseClient();
   if (supabase) {
-    let uploadedImageUrl: string | null = input.imageDataUrl ?? null;
+    let uploadedUrls: string[] = [...dataUrls];
 
-    if (input.imageFile) {
-      const fileExt = input.imageFile.name.split(".").pop() || "jpg";
-      const filePath = `posts/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage
-        .from(storageBucket)
-        .upload(filePath, input.imageFile, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+    if (validatedFiles.length > 0) {
+      uploadedUrls = await Promise.all(
+        validatedFiles.map(async ({ file, mime }) => {
+          const { blob, ext, contentType } = await reencodeSafeImageBlob(
+            file,
+            mime
+          );
+          const filePath = `posts/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from(storageBucket)
+            .upload(filePath, blob, {
+              cacheControl: "3600",
+              contentType,
+              upsert: false,
+            });
 
-      if (!uploadError) {
-        const { data: publicUrlData } = supabase.storage
-          .from(storageBucket)
-          .getPublicUrl(filePath);
-        uploadedImageUrl = publicUrlData.publicUrl;
-      } else {
-        // Fallback to compressed data URL if bucket isn't created yet
-        uploadedImageUrl = await fileToCompressedDataUrl(input.imageFile);
-      }
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage
+              .from(storageBucket)
+              .getPublicUrl(filePath);
+            return publicUrlData.publicUrl;
+          }
+          return fileToCompressedDataUrl(file);
+        })
+      );
     }
 
     const { data, error } = await supabase
@@ -223,23 +316,25 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
       .insert([
         {
           author_name: trimmedAuthor,
-          message: trimmedMessage,
-          image_url: uploadedImageUrl,
+          body: trimmedMessage,
+          photo_url: serializePhotoUrls(uploadedUrls),
         },
       ])
-      .select("id, author_name, message, image_url, created_at")
+      .select("id, user_id, author_name, body, photo_url, created_at")
       .single();
 
     if (error) {
       throw new Error(error.message || "Failed to publish post to Supabase.");
     }
-    return data as Post;
+    return mapSupabaseRowToPost(data as SupabasePostRow);
   }
 
   // LocalStorage mode
-  let imageUrl = input.imageDataUrl ?? null;
-  if (!imageUrl && input.imageFile) {
-    imageUrl = await fileToCompressedDataUrl(input.imageFile);
+  let localUrls: string[] = [...dataUrls];
+  if (localUrls.length === 0 && validatedFiles.length > 0) {
+    localUrls = await Promise.all(
+      validatedFiles.map(({ file }) => fileToCompressedDataUrl(file))
+    );
   }
 
   // Tiny simulated network latency for realistic loading state feedback
@@ -252,7 +347,8 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
         : `post-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     author_name: trimmedAuthor,
     message: trimmedMessage,
-    image_url: imageUrl,
+    image_url: localUrls[0] ?? null,
+    image_urls: localUrls,
     created_at: new Date().toISOString(),
   };
 

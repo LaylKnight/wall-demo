@@ -26,7 +26,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen bg-[#edece8] text-[#1f1f1f] font-sans">
+      <body className="min-h-screen bg-white text-[#1E1E1E] font-sans">
         {children}
       </body>
     </html>
